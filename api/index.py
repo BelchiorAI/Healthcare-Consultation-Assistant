@@ -15,6 +15,8 @@ class Visit(BaseModel):
     date_of_visit: str
     notes: str
 
+class AssistantRequest(BaseModel):
+    message: str
 
 system_prompt = """
 You are provided with notes written by a doctor from a patient's visit.
@@ -66,3 +68,35 @@ def consultation_summary(
                 yield f"data: {lines[-1]}\n\n"
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
+
+
+@app.post("/api/assistant")
+def ai_assistant(
+    data: AssistantRequest,
+    creds: HTTPAuthorizationCredentials = Depends(clerk_guard),
+):
+    user_id = creds.decoded["sub"]
+
+    client = OpenAI()
+
+    system_prompt = """
+You are a professional medical AI assistant.
+
+You help doctors by:
+- Answering medical questions
+- Explaining diagnoses
+- Suggesting next steps
+- Being concise and accurate
+"""
+
+    response = client.chat.completions.create(
+        model="gpt-5-nano",
+        messages=[
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": data.message},
+        ],
+    )
+
+    return {
+        "reply": response.choices[0].message.content
+    }

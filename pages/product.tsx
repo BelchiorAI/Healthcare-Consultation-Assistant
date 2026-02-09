@@ -9,11 +9,70 @@ import remarkBreaks from 'remark-breaks';
 import { fetchEventSource } from '@microsoft/fetch-event-source';
 import { Protect, PricingTable, UserButton } from '@clerk/nextjs';
 
+
+function useSpeechRecognition(onResult: (text: string) => void) {
+    const [listening, setListening] = useState(false);
+  
+    const startListening = () => {
+      const SpeechRecognition =
+        (window as any).SpeechRecognition ||
+        (window as any).webkitSpeechRecognition;
+  
+      if (!SpeechRecognition) {
+        alert("Speech Recognition not supported in this browser");
+        return;
+      }
+  
+      const recognition = new SpeechRecognition();
+  
+      recognition.continuous = true;
+      recognition.interimResults = true;
+      recognition.lang = "en-US";
+  
+      recognition.onstart = () => {
+        setListening(true);
+      };
+  
+      recognition.onend = () => {
+        setListening(false);
+      };
+  
+      recognition.onresult = (event: any) => {
+        let transcript = "";
+  
+        for (let i = event.resultIndex; i < event.results.length; i++) {
+          transcript += event.results[i][0].transcript;
+        }
+  
+        onResult(transcript);
+      };
+  
+      recognition.start();
+    };
+  
+    const stopListening = () => {
+      const SpeechRecognition =
+        (window as any).SpeechRecognition ||
+        (window as any).webkitSpeechRecognition;
+  
+      if (!SpeechRecognition) return;
+  
+      const recognition = new SpeechRecognition();
+      recognition.stop();
+      setListening(false);
+    };
+  
+    return { startListening, stopListening, listening };
+  }
+  
+
 function ConsultationForm() {
     const { getToken } = useAuth();
 
     // Form state
     const [patientName, setPatientName] = useState('');
+
+  
     const [visitDate, setVisitDate] = useState<Date | null>(new Date());
     const [notes, setNotes] = useState('');
 
@@ -21,6 +80,26 @@ function ConsultationForm() {
     const [output, setOutput] = useState('');
     const [loading, setLoading] = useState(false);
 
+    // NEW: Text-to-speech state
+    const [isSpeaking, setIsSpeaking] = useState(false);
+    const [assistantActive, setAssistantActive] = useState(false);
+const [assistantReply, setAssistantReply] = useState('');
+
+  
+    const { startListening, stopListening, listening } =
+    useSpeechRecognition((text) => {
+      if (assistantActive) {
+        askAssistant(text);
+      } else {
+        setNotes((prev) => prev + " " + text);
+      }
+    });
+  
+
+
+
+
+    
     async function handleSubmit(e: FormEvent) {
         e.preventDefault();
         setOutput('');
@@ -63,11 +142,89 @@ function ConsultationForm() {
         });
     }
 
+    // NEW: Text-to-speech function
+   
+    
+    function speakText(text: string) {
+        const utterance = new SpeechSynthesisUtterance(text);
+      
+        utterance.lang = "en-US";
+        utterance.rate = 1;
+        utterance.pitch = 1;
+      
+        speechSynthesis.speak(utterance);
+      }
+
+
+      async function askAssistant(question: string) {
+        const jwt = await getToken();
+        if (!jwt) return;
+      
+        try {
+          const res = await fetch('/api/assistant', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${jwt}`,
+            },
+            body: JSON.stringify({ message: question }),
+          });
+      
+          const data = await res.json();
+      
+          setAssistantReply(data.reply);
+      
+          // Speak reply
+          speakText(data.reply);
+      
+        } catch (err) {
+          console.error("Assistant error:", err);
+        }
+      }
+      
+      
     return (
         <div className="container mx-auto px-4 py-12 max-w-3xl">
             <h1 className="text-4xl font-bold text-gray-900 dark:text-gray-100 mb-8">
                 Consultation Notes
             </h1>
+
+{/* AI Voice Assistant */}
+<div className="mb-6 p-4 bg-indigo-50 dark:bg-indigo-900 rounded-xl shadow">
+
+  <div className="flex items-center justify-between">
+
+    <div>
+      <h2 className="font-semibold text-indigo-700 dark:text-indigo-200">
+        🤖 AI Voice Assistant
+      </h2>
+
+      <p className="text-sm text-indigo-600 dark:text-indigo-300">
+        Ask medical questions by voice
+      </p>
+    </div>
+
+    <button
+      type="button"
+      onClick={() => setAssistantActive(!assistantActive)}
+      className={`px-4 py-2 rounded-lg text-white ${
+        assistantActive
+          ? 'bg-red-600 hover:bg-red-700'
+          : 'bg-indigo-600 hover:bg-indigo-700'
+      }`}
+    >
+      {assistantActive ? 'Disable' : 'Enable'}
+    </button>
+
+  </div>
+
+  {assistantReply && (
+    <div className="mt-3 p-3 bg-white dark:bg-gray-800 rounded-lg text-sm">
+      <strong>Assistant:</strong> {assistantReply}
+    </div>
+  )}
+
+</div>
 
             <form onSubmit={handleSubmit} className="space-y-6 bg-white dark:bg-gray-800 rounded-xl shadow-lg p-8">
                 <div className="space-y-2">
@@ -104,15 +261,47 @@ function ConsultationForm() {
                     <label htmlFor="notes" className="block text-sm font-medium text-gray-700 dark:text-gray-300">
                         Consultation Notes
                     </label>
-                    <textarea
-                        id="notes"
-                        required
-                        rows={8}
-                        value={notes}
-                        onChange={(e) => setNotes(e.target.value)}
-                        className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent dark:bg-gray-700 dark:text-white"
-                        placeholder="Enter detailed consultation notes..."
-                    />
+                    <div className="space-y-2">
+ 
+
+  {/* Voice Controls */}
+  <div className="flex gap-3 mb-2">
+    {!listening ? (
+      <button
+        type="button"
+        onClick={startListening}
+        className="bg-green-600 hover:bg-green-700 text-white px-4 py-1 rounded-lg text-sm"
+      >
+        🎤 Start Dictation
+      </button>
+    ) : (
+      <button
+        type="button"
+        onClick={stopListening}
+        className="bg-red-600 hover:bg-red-700 text-white px-4 py-1 rounded-lg text-sm"
+      >
+        ⏹ Stop
+      </button>
+    )}
+
+    {listening && (
+      <span className="text-sm text-green-600 font-medium">
+        Listening...
+      </span>
+    )}
+  </div>
+
+  <textarea
+    id="notes"
+    required
+    rows={8}
+    value={notes}
+    onChange={(e) => setNotes(e.target.value)}
+    className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent dark:bg-gray-700 dark:text-white"
+    placeholder="Speak or type consultation notes..."
+  />
+</div>
+
                 </div>
 
                 <button 
@@ -126,6 +315,26 @@ function ConsultationForm() {
 
             {output && (
                 <section className="mt-8 bg-gray-50 dark:bg-gray-800 rounded-xl shadow-lg p-8">
+                    {/* NEW: Read Aloud Button */}
+                    <div className="mb-4 flex gap-2">
+                        <button
+                            onClick={() => speakText(output)}
+                            disabled={isSpeaking}
+                            className="bg-purple-600 hover:bg-purple-700 disabled:bg-purple-400 disabled:cursor-not-allowed text-white font-semibold py-2 px-6 rounded-lg transition-colors duration-200 flex items-center gap-2"
+                        >
+                            {isSpeaking ? (
+                                <>
+                                    <span className="animate-pulse">🔊</span>
+                                    Speaking...
+                                </>
+                            ) : (
+                                <>
+                                    🔊 Read Aloud
+                                </>
+                            )}
+                        </button>
+                    </div>
+                    
                     <div className="markdown-content prose prose-blue dark:prose-invert max-w-none">
                         <ReactMarkdown remarkPlugins={[remarkGfm, remarkBreaks]}>
                             {output}
@@ -135,6 +344,12 @@ function ConsultationForm() {
             )}
         </div>
     );
+
+
+
+    
+      
+
 }
 
 export default function Product() {
